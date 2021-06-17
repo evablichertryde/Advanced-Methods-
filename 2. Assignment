@@ -1,0 +1,1508 @@
+#This is code to replicate the analysis in Klar's 2018 "When Common Identities
+#Decrease Trust" paper in American Journal of Political Science 62(3).
+
+
+#organization of the code:
+  #the code it organized in 3 section, like the analysis.
+  #EXT in the heading means that the code is a part of my extension of the
+  #analysis.
+  #in section two, I run the results with both Klar's gender variable, and my
+  #deduced gender code.
+  #each section ends clearing the global environment, before moving on to a new
+  #dataset.
+
+#______________________________________________________________________________
+#----------------------------------Set up--------------------------------------
+#______________________________________________________________________________
+Sys.setenv("LANGUAGE"="EN") ##change error message language from Danish to English
+library(tidyverse)
+library(haven) ##open statafiles
+library(car) ##anova test
+library(stargazer) ##regression tables
+library(rstatix) ##asses homoheneity of variances
+library(ggpubr) ##customixe ggplot
+library(emmeans) ##Obtain estimated marginal means for interaction models
+library(foreign)##open statafiles
+library(Hmisc) ##converet R object to Latex
+library(xtable)##convert object to xtable, ehich can be printed as Latex
+
+#set working dircetory
+setwd("C:/Users/Bruger/OneDrive - Københavns Universitet/Dokumenter/9. semester/methods/assignment 2/klar/final/")
+
+#______________________________________________________________________________
+#------------------------SECTION 1 open data-----------------------------------
+#______________________________________________________________________________
+#open data for section one of klar analysis. 
+df_1 <- read_dta("Dataset for Figure 1.dta")
+
+#______________________________________________________________________________
+#----------------------------------sec 1: recoding-----------------------------
+#______________________________________________________________________________
+# removes na answers from the three dependent variables in the dataset, 
+# which has the value 6. 
+df_1 <- df_1%>%
+  filter(feminist_describe_you != 6, feminist_democratic_women != 6, feminist_describe_republican != 6)
+
+# I reverse the scale of the variables and save them as new variables. in the
+# new scale 5 means that feminister does describes the women very well, why 1
+# means that feminist does not describes the women at all
+df_1 <- df_1 %>%
+  mutate(feminist_describe_you_rev = 6 - feminist_describe_you,
+         feminist_democratic_women_rev = 6 - feminist_democratic_women,
+         feminist_describe_republican_rev = 6 - feminist_describe_republican)%>%
+  #change the scale 1: not at all, 5: extremely well
+  filter(party_id==1 | party_id==2)%>% #remove independents
+  mutate(party_id = as.character(party_id))
+
+# create party vairable with the parties name that the respondents identify with
+# so the data is more intutive and i dont need to check the codebook to make
+# sense of it
+attach(df_1)
+df_1$party_name[party_id == 1] <- "Republican"
+df_1$party_name[party_id == 2] <- "Democrat"
+detach(df_1)
+
+#______________________________________________________________________________
+#--------------------sec 1: regression original scale--------------------------
+#______________________________________________________________________________
+#Replicate figure one in klar paper, section one, with klar original scale
+    #create factor variable 
+df_1 <- df_1%>%
+  mutate(party_id = factor(party_id, labels = c("Republican", "Democract")))
+
+str(df_1$party_id) ##check that the labels was attached and factor was ordered correctly. 
+contrasts(df_1$party_id)
+
+#I run regression model for each dependent variable, with party identification
+#as independent variable, using OLS regression
+
+#dependent variable: how well does feminist describes you?
+model_1_you <- lm(feminist_describe_you ~ party_id, data = df_1)
+summary(model_1_you)
+
+#dependent variable: how well does feminist describes democratic women? 
+model_1_dnc <- lm(feminist_democratic_women ~ party_id, data = df_1)
+summary(model_1_dnc)
+
+#dependent variable: how well does feminist describes republican women?
+model_1_gop <- lm(feminist_describe_republican ~ party_id, data = df_1)
+summary(model_1_gop)
+
+#create regression table with the different dependent variables 
+stargazer(model_1_you, model_1_dnc, model_1_gop,
+          title = "Regression table of figure 1",
+          covariate.labels = c("Democratic woman", "Constant (Republican woman)"),
+          digits = 2, omit.stat=c("LL","ser","f"),
+          dep.var.caption  = "How the term 'feminism' describes: ",
+          dep.var.labels   = c("Individual", "Democratic woman", "Republican woman"),
+          label = "fig 1")
+
+#______________________________________________________________________________
+#--------------------sec 1: figure code original scale-------------------------
+#______________________________________________________________________________
+#in this part of the code, I create a dataframe with the coefficients from the
+#three models, just created above.
+
+#I create a function that allows me to create a dataframe with outcome variable
+#for republican and democratic women and the values for max and min with a 95%
+#confidence interval
+
+section_1_regression_plot <- function(x){ ##x is the lm model
+  df_x <- data.frame(confint(x)) 
+    ##obtains confidence interval from the linear model. add to a new dataframe
+  df_x_1 <- data.frame(summary(x)$coefficients)
+    ##obtain coefficinets from the linear model. Add to a new dataframe
+  df_x <- bind_cols(df_x_1, df_x)
+    ##combine in one dataset
+  df_x <- df_x %>%
+    rename(minerror = X2.5.., maxerror = X97.5..)%>%
+    select(Estimate, minerror, maxerror)
+    #select and rename variables
+  dem <- data.frame(df_x[1,1] + df_x[2,]) ##calulated the values of democrats
+  df_x <- full_join(df_x, dem) ##combine dataframe
+  rm(df_x_1, dem) ##remove dataframe that I don't need any more
+  df_x <- df_x%>% #remove data i dont need
+    slice(-c(2))
+  df_x$party <- c("rep", "dem") #create party variable 
+  return(df_x) #return dataframe
+}
+
+#create regression dataframe for each model using function
+#section_1_regression_plot
+df_model_1_you <- section_1_regression_plot(model_1_you)  
+df_model_1_dnc <- section_1_regression_plot(model_1_dnc)  
+df_model_1_gop <- section_1_regression_plot(model_1_gop)  
+
+
+#add labels that shows what the dependent variable is, befor joining the three
+#dataframes
+df_model_1_you$variable <- "you"
+df_model_1_dnc$variable <- "DNC"
+df_model_1_gop$variable <- "GOP"
+
+#combine in one dataframe 
+df_model_1<- full_join(df_model_1_you, df_model_1_dnc)
+df_model_1<- full_join(df_model_1, df_model_1_gop)
+rm(df_model_1_you, df_model_1_dnc, df_model_1_gop)
+
+
+#______________________________________________________________________________
+#--------------------sec 1: figure original scale------------------------------
+#______________________________________________________________________________
+#order factors and add labels
+df_model_1 <- df_model_1%>%
+  mutate(party = factor(party, labels = c("Democract", "Republican")))
+str(df_model_1$party)
+contrasts(df_model_1$party)
+
+#add labels to the three dependent variables. 
+str(df_model_1$variable)
+df_model_1 <- df_model_1%>%
+  mutate(variable = factor(variable, labels = c("DNC", "GOP", "you")))%>%
+  mutate(variable = fct_relevel(variable, c("you", "DNC", "GOP")))
+str(df_model_1$variable)
+
+#scatter variables
+pd <- position_dodge(0.5)
+
+# create plot that shows the dependent variables, with the original scale. I add
+# limits and labels to the x and y-axis. i also remove the axis title and axis
+# grid. I add errorbar that show the 95% confidence interval
+pdf("1_error.pdf", width = 9, height = 6)
+df_model_1%>%
+  ggplot(aes(party, Estimate, color = variable))+
+  geom_point(position=pd, size = 2)+
+    scale_y_continuous(limits = c(1,5), labels = c("Extremely well: 1", "Very well: 2",
+                        "Somewhat well: 3", "Not very well: 4", "Not at all: 5"))+
+    scale_x_discrete(labels = c("Democratic \nwoman", "Republican \nwoman"))+
+    labs(x = "", y = "")+
+    geom_errorbar(aes(ymax = maxerror, ymin = minerror), width = 0.3, position=pd)+
+    theme(panel.grid.major.x = element_blank())+
+    scale_color_manual(labels = c("How well does 'feminist' \ndescribe you?",
+             "How well does 'feminist' \ndescribe Democratic woman?",
+             "How well does 'feminist' \ndescribe Republican woman?"),
+                       values=c("black","blue","red"))+
+    theme(legend.text = element_text(size = 10))+
+    theme(legend.title = element_blank())
+dev.off()
+
+#______________________________________________________________________________
+#--------------------sec 1: regression reversed scale--------------------------
+#______________________________________________________________________________
+# create ordered factor variable of party identification and check that
+# republican is the reference category
+df_1 <- df_1%>%
+  mutate(party_id = factor(party_id, labels = c("Republican", "Democract")))
+str(df_1$party_id)
+contrasts(df_1$party_id)
+
+#I run regression model for each dependent variable, with party identification
+#as independent variable, using OLS regression. now with the reversed scale
+
+#how well does feminist describes you?
+model_1_your <- lm(feminist_describe_you_rev ~ party_id, data = df_1)
+summary(model_1_your)
+
+#how well does feminist describes democratic women?
+model_1_dncr <- lm(feminist_democratic_women_rev ~ party_id, data = df_1)
+summary(model_1_dncr)
+
+#how well does feminist describes republican women?
+model_1_gopr <- lm(feminist_describe_republican_rev ~ party_id, data = df_1)
+summary(model_1_gopr)
+
+# create regression table with 3 models with the reversed scale
+# 1. how well feminist describes you?
+# 2. how well feminist describes typical democratic women?
+# 3. how well feminist describes typical republican women?
+stargazer(model_1_your, model_1_dncr, model_1_gopr,
+          title = "Regression table of figure 1 rev",
+          covariate.labels = c("Democratic woman", "Constant (Republican woman)"),
+          digits = 2, omit.stat=c("LL","ser","f"),
+          dep.var.caption  = "How the term 'feminism' describes: ",
+          dep.var.labels   = c("Individual", "Democratic woman", "Republican woman"),
+          label = "fig 1 rev")
+
+#______________________________________________________________________________
+#--------------------sec 1: figure code reversed scale-------------------------
+#______________________________________________________________________________
+#substract 6 from estimate, min and max bound for confidence interval in
+#df_model_1, to obtain regression dataframe with reversed scale.
+df_model_1r <- df_model_1 %>%
+  mutate(Estimate = 6 - Estimate,
+         minerror = 6 - minerror,
+         maxerror = 6 - maxerror)
+
+#______________________________________________________________________________
+#--------------------sec 1: figure reversed scale------------------------------
+#______________________________________________________________________________
+#scatter variables
+pd <- position_dodge(0.5)
+
+#create plot that shows the dependent variables, with the reserved scale. I add
+#limits and labels to the x and y-axis. i also remove the axis title and axis
+#grid. I add errorbar that show the 95% confidence interval.
+pdf("1_error_rev.pdf", width = 9, height = 6)
+df_model_1r%>%
+  ggplot(aes(party, Estimate, color = variable))+
+  geom_point(position=pd, size = 2)+
+  scale_y_continuous(limits = c(1,5), labels = c("Not at all: 1", "Not very well: 2", 
+                                                 "Somewhat well: 3", "Very well: 4","Extremely well: 5"))+
+  scale_x_discrete(labels = c("Democratic \nwoman", "Republican \nwoman"))+
+  labs(x = "", y = "")+
+  theme(panel.grid.major.x = element_blank())+
+  geom_errorbar(aes(ymax = maxerror, ymin = minerror), width = 0.3, position=pd)+
+  scale_color_manual(labels = c("How well does 'feminist' \ndescribe you?", 
+                                "How well does 'feminist' \ndescribe Democratic woman?",
+                                "How well does 'feminist' \ndescribe Republican woman?"),
+                     values=c("black","blue","red"))+
+  theme(legend.text = element_text(size = 10))+
+  theme(legend.title = element_blank())
+dev.off()
+
+#______________________________________________________________________________
+#------------------------End of Section one--------------------------------------
+#______________________________________________________________________________
+rm(list = ls())
+#clear global enviroment 
+
+#______________________________________________________________________________
+#----------------------------SECTION 2 open data------------------------------
+#______________________________________________________________________________
+#open data
+df_2_5 <- read_dta("Dataset for Figures 2 3 4 and 5.dta")
+
+#______________________________________________________________________________
+#------------------------------sec 2: cleaning data----------------------------
+#______________________________________________________________________________
+unique(df_2_5$pid) #examine the party categories in the dataset
+df_2_5$party <- ifelse(df_2_5$pid < 4, c("Dem"), c("Rep"))
+#create binary party variable
+df_2_5 <- df_2_5 %>%
+  filter(pid != 4, pid != "NA") #drop NA and independents
+
+#create variable, that describes in or out group and party
+attach(df_2_5)
+df_2_5$group[party == "Dem" & gopcand == 0] <- "Ingroup (dems)"
+df_2_5$group[party == "Dem" & gopcand == 1] <- "Outgroup (dems)"
+df_2_5$group[party == "Rep" & gopcand == 1] <- "Ingroup (rep)"
+df_2_5$group[party == "Rep" & gopcand == 0] <- "Outgroup (rep)"
+detach(df_2_5)
+#create numeric variable that show in or outgorup treatment
+attach(df_2_5)
+df_2_5$groupnum[group == "Ingroup (dems)" | group == "Ingroup (rep)"] <- 0
+df_2_5$groupnum[group == "Outgroup (dems)" | group == "Outgroup (rep)"] <- 1
+detach(df_2_5)
+
+#create facet lables
+party_names <- list("Dem" = "Democrats", "Rep" = "Republicans")
+party_labeller <- function(variable,value){
+  return(party_names[value])
+}
+
+#create 2 gender categories
+#conditions according to codebook p. 4
+attach(df_2_5)
+df_2_5$con_gen_code[condition %in% c(1, 3, 5, 7)] <- "woman"
+df_2_5$con_gen_code_num[condition %in% c(1, 3, 5, 7)] <- 0 
+#according to the codebook 0 value is a woman candidate
+df_2_5$con_gen_code[condition %in% c(2, 4, 6, 8)] <- "male"
+df_2_5$con_gen_code_num[condition %in% c(2, 4, 6, 8)] <- 1
+detach(df_2_5)
+
+#gender according to codebook
+attach(df_2_5)
+df_2_5$code_gender[womancand == 0] <- "woman"
+df_2_5$code_gender[womancand == 1] <- "male"
+detach(df_2_5)
+
+#save the recode dataframe. 
+write.csv(df_2_5, "C:/Users/Bruger/OneDrive - Københavns Universitet/Dokumenter/9. semester/methods/assignment 2/klar/final/df_2_5.csv", row.names = FALSE)
+
+#_________________________________________________________________________
+#----sec 2: gender variable----
+#_________________________________________________________________________
+#compare klar codebook gender and my deduced gender variable 
+table(df_2_5$code_gender, df_2_5$con_gen_code)
+
+#_________________________________________________________________________
+#----sec 2:  Klars subgroup analysis - gender salient issues----
+#_________________________________________________________________________
+#replicate figure 2 + 3 in klars paper. I only keep data from women respondents,
+#and with gets the gender-salient treatment
+df_2_3 <- df_2_5 %>%
+  filter(gender == 2, #only women respondens
+         womanissue==1)%>% #equal pay
+  select(diffparty, code_gender, con_gen_code, group, groupnum, 
+         womanissue, trust, party) #select relevant variables
+
+#scatter variables
+pd <- position_dodge(0.2)
+
+#code_gender as gender - Klar gender variable
+  # create plot that shows the treatment effect with Klars gender variable. the
+  # plot show the effect of treatment on trust, depending on respondents party,
+  # treatments vignette party and gender. I add limits and labels to the x and
+  # y-axis. i also remove the axis title and axis grid. I add error bars that
+  # show the 95% confidence interval
+pdf("2_3_codebook_gender.pdf", width = 8, height = 6)
+df_2_3 %>%
+  ggplot(aes(x=group, y = trust, color = code_gender, group = code_gender))+
+  facet_grid(col = vars(party), scales = "free_x", labeller = party_labeller)+
+  stat_summary(fun = mean, geom = "point", position = pd) +
+  stat_summary(fun = mean, geom = "line", linetype = "dashed")+
+  stat_summary(geom = "errorbar",  width = 0.1, position = pd)+
+  scale_y_continuous(limits = c(1,7), breaks = c(1, 2, 3, 4, 5, 6, 7), labels = 
+                       c("1: Do not trust at all", "2", "3", "4: Moderaly trust", "5", "6", 
+                         "7: High degreee \nof trust"))+
+  scale_color_manual(labels = c("Male \ncharacter", "Female \ncharacter"), 
+                     values = c("blue", "red"))+
+  labs(x = "", y = "", title = "Trustworthiness of Lilly Ledbetter Act supporters", 
+       subtitle = "among female Democrats and Republicans",
+       caption = "Joined figure 2 and 3 from page 616-617, codebook gender",
+       color = "Gender")+
+  theme(panel.grid.major.x = element_blank())
+dev.off()
+
+#con_gen_code as gender, my deduced gender variable
+  # create plot that shows the treatment effect with my deduced gender variable.
+  # the plot show the effect of treatment on trust, depending on respondents
+  # party, treatments vignette party and gender. I add limits and labels to the
+  # x and y-axis. i also remove the axis title and axis grid. I add error bars
+  # that show the 95% confidence interval
+pdf("2_3_condition_gender_codebook.pdf", width = 8, height = 6)
+df_2_3 %>%
+  ggplot(aes(x=group, y = trust, color = con_gen_code, group = con_gen_code))+
+  facet_grid(col = vars(party), scales = "free_x", labeller = party_labeller)+
+  stat_summary(fun = mean, geom = "point", position = pd) +
+  stat_summary(fun = mean, geom = "line", linetype = "dashed")+
+  stat_summary(geom = "errorbar",  width = 0.1, position = pd)+
+  scale_y_continuous(limits = c(1,7), breaks = c(1, 2, 3, 4, 5, 6, 7), labels = 
+                       c("1: Do not trust at all", "2", "3", "4: Moderaly trust", "5", "6", 
+                         "7: High degreee \nof trust"))+
+  scale_color_manual(labels = c("Male \ncharacter", "Female \ncharacter"),
+                     values = c("blue", "red"))+
+  labs(x = "", y = "", title = "Trustworthiness of Lilly Ledbetter Act supporters", 
+       subtitle = "among female Democrats and Republicans",
+       caption = "Joined figure 2 and 3 from page 616-617, condition gender codebook",
+       color = "Gender")+
+  theme(panel.grid.major.x = element_blank())
+dev.off()
+
+
+#_________________________________________________________________________
+#sec 2: Klars subgroup analysis - gender salient issues- regression models----
+#_________________________________________________________________________
+# I write two functions to obtain four separate dataframe for either only
+# democratic or republican observation with either klar or my deduced gender
+# variable. afterwards i use the four new dataframe to run and save a OLS
+# regression model.
+# 
+#   function dataframe_gendervar_party takes the dataframe(df_2_3) and create a
+#   new dataframe with a specific gender variable (either klars or my deduced
+#   gender variable) and a specific party id (Dem or Rep). function
+#   model_no_gender_party runs a save a linear regression model from the
+#   dataframe create with function dataframe_gendervar_party.
+
+dataframe_gendervar_party <- function(data, gender, partyid) {
+  data <- data %>% rename(candidate_gender := gender)
+  data <- data%>%
+    filter(party == partyid) 
+  subset(data, select = c(diffparty, group, groupnum, 
+           womanissue, trust, party, candidate_gender))}
+
+model_no_gender_party <- function(x){
+  lm(trust ~ diffparty*candidate_gender, data = x)} 
+
+# Klar gender variable and democratic observations
+df_2_3_codebook_gender_dem <- 
+  dataframe_gendervar_party(df_2_3, gender="code_gender", partyid = "Dem")
+model_2_3_code_gender_dem <- model_no_gender_party(df_2_3_codebook_gender_dem)
+summary(model_2_3_code_gender_dem)
+
+# Klar gender variable and republican observations
+df_2_3_codebook_gender_rep <- 
+  dataframe_gendervar_party(df_2_3, gender="code_gender", partyid = "Rep")
+model_2_3_code_gender_rep <- model_no_gender_party(df_2_3_codebook_gender_rep)
+summary(model_2_3_code_gender_rep)
+
+# My deduced gender variable and democratic observations
+df_2_3_codebook_gender_condition_dem <- 
+  dataframe_gendervar_party(df_2_3, gender="con_gen_code", partyid = "Dem")
+model_2_3_codebook_gender_condition_dem <- model_no_gender_party
+(df_2_3_codebook_gender_condition_dem)
+summary(model_2_3_codebook_gender_condition_dem)
+
+# My deduced gender variable and republican observations
+df_2_3_codebook_gender_condition_rep <- 
+  dataframe_gendervar_party(df_2_3, gender="con_gen_code", partyid = "Rep")
+model_2_3_codebook_gender_condition_rep <- model_no_gender_party
+(df_2_3_codebook_gender_condition_rep)
+summary(model_2_3_codebook_gender_condition_rep)
+
+#_________________________________________________________________________
+#----sec 2:  Klars subgroup analysis - non-gender salient issues----
+#_________________________________________________________________________
+#to replicate figure 4 in klars paper i create a dataframe that only has
+#observation that are female and got the non-gender salient treatment, ie. The
+#Iran Deal
+df_4 <- df_2_5 %>%
+  filter(gender == 2, #only women respondens
+         womanissue==0)%>% #non-gender salient issues
+  select(trust, diffparty, party, gender, womanissue, 
+         code_gender, con_gen_code, group, groupnum)
+
+#Klar gender variable figure: code_gender as gender
+# create plot that shows the treatment effect with klars gender variable. the
+# plot show the effect of treatment on trust, depending on respondents party,
+# treatments vignette party and gender. I add limits and labels to the x and
+# y-axis. i also remove the axis title and axis grid. I add error bars that show
+# the 95% confidence interval
+pdf("4_codebook_gender.pdf", width = 8, height = 6)
+df_4 %>%
+  ggplot(aes(x=group, y = trust, color = code_gender, group = code_gender))+
+  facet_grid(col = vars(party), scales = "free_x", labeller = party_labeller)+
+  stat_summary(fun = mean, geom = "point", position = pd) +
+  stat_summary(fun = mean, geom = "line", linetype = "dashed")+
+  stat_summary(geom = "errorbar",  width = 0.1, position = pd)+
+  scale_y_continuous(limits = c(1,7), breaks = c(1, 2, 3, 4, 5, 6, 7), labels = 
+                       c("1: Do not trust at all", "", "", "4: Moderaly trust", "", "", 
+                         "7: High degreee \nof trust"))+
+  scale_color_manual(labels = c("Male \ncharacter", "Female \ncharacter"), 
+                     values = c("blue", "red"))+
+  labs(x = "", y = "", title = "Trustworthiness of Iran Deal supporters", 
+       subtitle = "among female Democrats and Republicans",
+       caption = "Figure 4 from page 617, codebook gender",
+       color = "Gender")+
+  theme(panel.grid.major.x = element_blank())
+dev.off()
+
+
+#Deduced gender variable figure: con_gen_code as gender
+# create plot that shows the treatment effect with my deduced gender variable.
+# the plot show the effect of treatment on trust, depending on respondents
+# party, treatments vignette party and gender. I add limits and labels to the x
+# and y-axis. i also remove the axis title and axis grid. I add error bars that
+# show the 95% confidence interval
+pdf("4_condition_gender_codebook.pdf", width = 8, height = 6)
+df_4 %>%
+  ggplot(aes(x=group, y = trust, color = con_gen_code, group = con_gen_code))+
+  facet_grid(col = vars(party), scales = "free_x", labeller = party_labeller)+
+  stat_summary(fun = mean, geom = "point", position = pd) +
+  stat_summary(fun = mean, geom = "line", linetype = "dashed")+
+  stat_summary(geom = "errorbar",  width = 0.1, position = pd)+
+  scale_y_continuous(limits = c(1,7), breaks = c(1, 2, 3, 4, 5, 6, 7), labels = 
+                       c("1: Do not trust at all", "", "", "4: Moderaly trust", "", "", 
+                         "7: High degreee of trust"))+
+  scale_color_manual(labels = c("Male \ncharacter", "Female \ncharacter"),  
+                     values = c("blue", "red"))+
+  labs(x = "", y = "", title = "Trustworthiness of Iran Deal supporters", 
+       subtitle = "among female Democrats and Republicans",
+       caption = "figure 4 from page 617, codebook condition gender",
+       color = "Gender")+
+  theme(panel.grid.major.x = element_blank())
+dev.off()
+
+#_________________________________________________________________________
+#sec 2: Klars subgroup analysis - non-gender salient issues - regression model ----
+#_________________________________________________________________________
+# I use my tw function created earlier dataframe_gendervar_party and
+# model_no_gender_party to obtain separate dataframe for dem and rep observation
+# that got non-gender salient treatment and with either klar og my deduced
+# gender variable as a part of the treatment. 
+
+# Klar gender variable and democratic observations
+df_4_codebook_gender_dem <- 
+  dataframe_gendervar_party(df_4, gender="code_gender", partyid = "Dem")
+model_4_code_gender_dem <- model_no_gender_party(df_4_codebook_gender_dem)
+summary(model_4_code_gender_dem)
+
+# Klar gender variable and Republican observations
+df_4_codebook_gender_rep <- 
+  dataframe_gendervar_party(df_4, gender="code_gender", partyid = "Rep")
+model_4_code_gender_rep <- model_no_gender_party(df_4_codebook_gender_rep)
+summary(model_4_code_gender_rep)
+
+# My deduced gender variable and democratic observations
+df_4_codebook_gender_condition_dem <- 
+  dataframe_gendervar_party(df_4, gender="con_gen_code", partyid = "Dem")
+model_4_codebook_gender_condition_dem <- 
+  model_no_gender_party(df_4_codebook_gender_dem)
+summary(model_4_codebook_gender_condition_dem)
+
+# My deduced gender variable and Republican observations
+df_4_codebook_gender_condition_rep <- 
+  dataframe_gendervar_party(df_4, gender="con_gen_code", partyid = "Rep")
+model_4_codebook_gender_condition_rep <- 
+  model_no_gender_party(df_4_codebook_gender_rep)
+summary(model_4_codebook_gender_condition_rep)
+
+#_________________________________________________________________________
+#----Sec 2: Klar subgroup analyse - regression tabel ----
+#_________________________________________________________________________
+# I create to seperate OLS regresion tables, either with Klars gender variable,
+# or my deduced gender variable.both table has 4 models 
+  # 1 and 2: shows effect of treatment on trust if the respondents got the
+    # gender-salient issues in the treatment
+  # 3 and 4: shows effect of treatment on trust if the respondents got the
+    # non-gender-salient issues in the treatment
+  # 1 and 3: the respondents are democrats 
+  # 2 and 4: the respondents are republicans
+
+#regression table with klar gender variable
+stargazer(model_2_3_code_gender_dem, model_2_3_code_gender_rep, 
+          model_4_code_gender_dem, model_4_code_gender_rep)
+
+#regression table with my deduced gender variable
+stargazer(model_2_3_codebook_gender_condition_dem, 
+          model_2_3_codebook_gender_condition_rep, 
+          model_4_codebook_gender_condition_dem, 
+          model_4_codebook_gender_condition_rep)
+
+#clean up global enviroment
+rm(list = apropos("df_2_3"))
+rm(list = apropos("df_4"))
+rm(list = apropos("model"))
+
+#_________________________________________________________________________
+#----sec 2: interaction model recodeing-----
+#_________________________________________________________________________
+
+df_5 <- df_2_5 %>%
+  filter(gender == 2)%>% #only select female respondens
+  select(diffparty, code_gender, con_gen_code, group, groupnum, 
+         womanissue, trust, party)
+
+#change gender order in codebook and conditin codebook gender 
+#change ordering of code_gender and con_gen_code
+
+df_5 <- df_5 %>%
+  mutate(code_gender_fct = as.factor(code_gender), 
+         con_gen_code_fct = as.factor(con_gen_code))
+
+contrasts(df_5$code_gender_fct)
+#shows how woman is base while, male is coded as zero, needs to change this
+
+#change reference category to male 
+df_5 <- df_5 %>%
+  mutate(code_gender = relevel(code_gender_fct, ref = "male"), 
+         con_gen_code= relevel(con_gen_code_fct, ref = "male"))
+
+#_________________________________________________________________________
+#----sec 2: interaction figure with klars gender variable----
+#_________________________________________________________________________
+
+#regression model with triple interaction with klar gender variable
+model_5_code_gender <- lm(trust ~ code_gender*diffparty*womanissue, data=df_5)
+summary(model_5_code_gender)
+
+#create function that substract relevant information need to create interaction
+#marginal means plot
+section_interaction_figure<- function(x) {
+  df_x <- data.frame(confint(x)) #obtain 95% confidence interval
+  df_x_1 <- data.frame(summary(x)$coefficients)#obtain regression coefficients
+  df_x <- bind_cols(df_x_1, df_x) #combine in one dataframe
+  df_x <- df_x %>%
+    rename(minerror = X2.5.., maxerror = X97.5..)%>%
+    select(Estimate, minerror, maxerror) #select relevant varaibles
+  df_x <- df_x[2:8,] #select marginal effect 
+  rm(df_x_1) #remove dataframe that I dont need any more
+  df_x$x_axis_value <- c(1, 2, 3, 4, 5, 6, 7) 
+  df_x$Estimate_label <- as.character(round(df_x$Estimate, digits = 3))#geom_text labels
+  df_x$x_axis_value1 <- forcats::fct_rev(factor(df_x$x_axis_value)) 
+  #so i can change the order of x-axis, after coordflip
+  df_x$x_axis_label = c("woman", "out-party", "gender-salient issue", "woman x out-party",
+                   "woman x gender-salient issue", "out-party x gender-salient issue",
+                   "woman x out-party x gender-salient issue") #marginal effects
+  return(df_x)
+}
+
+#create dataframe with relevant variables to create interaction plot, using 
+#section_interaction_figure function. 
+df5 <- section_interaction_figure(model_5_code_gender)
+
+
+# Klars gender variable figure
+# I create marginals effect plot that shows the treatment effect with klars
+# gender variable. the plot show the marginal effect of the treatment on trust,
+# with a a treatment of an inparty male that supports a non-gender salient issue
+# as the reference category. I plot the estimated effect on the x-axis and the
+# treatment variables on the y-axis. I add a vertical line that shows the when
+# the marginal effect is zero compared the the reference category. I add point
+# labels that shows the estimated effects value depending on respondents party,
+# treatments vignette party and gender. I add limits and labels to the x and
+# y-axis. i also remove the axis title and axis grid. I add error bars that show
+# the 95% confidence interval
+pdf("5_codebook_gender.pdf", width = 6, height = 6)
+ggplot(df5, aes(x=x_axis_value1, y=Estimate))+
+  geom_point()+
+  geom_hline(yintercept = 0)+
+  scale_y_discrete(limits =c(-3:2), 
+                   breaks = c(-1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 2.5))+
+  geom_errorbar(aes(ymin = minerror, 
+                    ymax = maxerror, width = 0.4))+
+  labs(x = "", y = "Baseline effect")+
+  theme_minimal()+
+  theme(panel.grid.minor.y=element_blank(),
+        panel.grid.major.y=element_blank())+
+  geom_text(aes(label = Estimate_label), hjust=0.5, vjust=-0.5, size=3.5)+
+  scale_x_discrete(limits = c(7:1),
+                   labels = c("Woman", "Out_party","Gender-salient issue", 
+                              "Woman x out-party", "Woman \nx gender-salient issue", 
+                              "Out-party \nx gender-salient issue", 
+                              "Woman x out-party \nx gender-salient issue"))+
+  coord_flip() #flip graph vertically 
+dev.off()
+
+#_________________________________________________________________________
+#----sec 2: interaction figure with my deduced gender variable----
+#_________________________________________________________________________
+#regression model with triple interaction with deduced gender variable
+model_5_con_gen_code <- lm(trust ~ con_gen_code*diffparty*womanissue, data=df_5)
+summary(model_5_con_gen_code)
+
+
+#create dataframe with relevant variables to create interaction plot, using 
+#section_interaction_figure function. 
+df5con <- section_interaction_figure(model_5_con_gen_code)
+
+# My deduced gender variable figure
+# I create marginals effect plot that shows the treatment effect with my deduced
+# gender variable. the plot show the marginal effect of the treatment on trust,
+# with a a treatment of an inparty male that supports a non-gender salient issue
+# as the reference category. I plot the estimated effect on the x-axis and the
+# treatment variables on the y-axis. I add a vertical line that shows the when
+# the marginal effect is zero compared the the reference category. I add point
+# labels that shows the estimated effects value depending on respondents party,
+# treatments vignette party and gender. I add limits and labels to the x and
+# y-axis. i also remove the axis title and axis grid. I add error bars that show
+# the 95% confidence interval
+pdf("5_condition_gender.pdf", width = 9, height = 6)
+ggplot(df5con, aes(x=x_axis_value1, y=Estimate))+
+  geom_point()+
+  geom_hline(yintercept = 0)+
+  scale_y_discrete(limits =c(-3:2), 
+                   breaks = c(-2.5, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2))+
+  geom_errorbar(aes(ymin = minerror, 
+                    ymax = maxerror, width = 0.4))+
+  labs(x = "", y = "Baseline effect")+
+  theme(panel.grid.minor.y=element_blank(),
+        panel.grid.major.y=element_blank())+
+  geom_text(aes(label = Estimate_label), hjust=0.5, vjust=-0.5, size=3.5)+
+  scale_x_discrete(limits = c(7:1),
+                   labels = c("Woman", "Out-party","Gender-salient issue", 
+                              "Woman x out-party", "Woman \nx gender-salient issue", 
+                              "Out-party \nx gender-salient issue", 
+                              "Woman x out-party \nx gender-salient issue"))+
+  coord_flip()
+dev.off()
+
+#_______________________________________________________________________________
+#----sec 2: interaction models----
+#_______________________________________________________________________________
+# to replicate figure 5 in klars paper i create two dataframe that only has
+# observation that are female. In the first new datafram (df_5_codebook_gender)
+# only has klars gender variable, while in the second
+# (df_5_codebook_gender_condition) only has my deduced gender variable. I rename
+# the gender variables in the new dataframes to candidate_gender, so it is the
+# same in both models. I run a OLS regression model of the triple interaction
+# with the two new dataframes
+
+# this enables the stargazer table to have one gender variable row
+df_5_codebook_gender <- df_2_5 %>%
+  filter(gender == 2)%>% #only select female respondents
+  rename(candidate_gender = code_gender)%>% #rename gender variable 
+  select(diffparty, candidate_gender, group, groupnum, 
+         womanissue, trust, party)
+
+#Klar gender variable 
+model_5_code_gender <- lm(trust ~ candidate_gender*diffparty*womanissue, 
+                          data=df_5_codebook_gender)
+summary(model_5_code_gender)
+
+
+df_5_codebook_gender_condition <- df_2_5 %>%
+  filter(gender == 2)%>% #only select female respondents
+  rename(candidate_gender = con_gen_code)%>% #rename gender variable 
+  select(diffparty, candidate_gender, group, groupnum, 
+         womanissue, trust, party)
+
+#My deduced gender variable
+model_5_code_gender_condition <- lm(trust ~ candidate_gender*diffparty*womanissue, 
+                                    data=df_5_codebook_gender_condition)
+summary(model_5_code_gender_condition)
+
+#_________________________________________________________________________
+#----sec 2: interaction table----
+#_________________________________________________________________________
+#regression table with klar gender variable
+stargazer(model_5_code_gender,
+          title = "Regression table of figure 5", 
+          column.labels = c("Klar gender variable"),
+          covariate.labels = c("Woman", "Out-party", "Gender-salient issue", 
+                               "Woman X Out-party", "Woman X Gender-salient issue", 
+                               "Out-party X Gender-Salient issue", 
+                               "Woman X Out-party X Gender-salient issue"),
+          digits = 3, omit.stat=c("LL","ser","f"))
+
+#regression table with my deduced gender variable
+stargazer(model_5_code_gender_condition, 
+          title = "Regression table of figure 5", 
+          column.labels = c("Deduced \ngender variable"),
+          covariate.labels = c("Woman", "Out-party", "Gender-salient issue", 
+                               "Woman X Out-party", "Woman X Gender-salient issue", 
+                               "Out-party X Gender-Salient issue", 
+                               "Woman X Out-party X Gender-salient issue"),
+          digits = 3, omit.stat=c("LL","ser","f"))
+
+#clean up global enviroment
+rm(list = apropos("df_5"))
+#rm(list = apropos("df5"))
+rm(list = apropos("model"))
+#_______________________________________________________________________________
+#----sec 2: extenstion
+#_______________________________________________________________________________
+#in the following section i will extend section two with subgroup analysis on
+#parties and gender of respondents
+
+
+#_______________________________________________________________________________
+#----sec 2: EXT PARTY - split for parties- my deduced gender variable----
+#_______________________________________________________________________________
+# I create a dataframe with female respondents that are democrats, and run a the
+# triple interaction with the new dataframe. I use my deduced gender variable
+df_5_ex_d <- df_2_5 %>%
+  filter(gender == 2, #only select female respondents
+         party == "Dem")%>% #only select democratic women
+  rename(candidate_gender = con_gen_code)%>%
+  select(diffparty, candidate_gender, group, groupnum, 
+         womanissue, trust, party)
+
+#regression model of triple interaction for women democrats with my deduced
+#gender variable
+model_5_ex_d <- lm(trust ~ candidate_gender*groupnum*womanissue, 
+                   data=df_5_ex_d)
+summary(model_5_ex_d)
+
+
+# I create a dataframe with female respondents that are republicans, and run a
+# the triple interaction with the new dataframe. I use my deduced gender
+# variable
+df_5_ex_r <- df_2_5 %>%
+  filter(gender == 2,#only select female respondents
+         party == "Rep")%>% #only select republican women
+  rename(candidate_gender = con_gen_code)%>%
+  select(diffparty, candidate_gender, group, groupnum, 
+         womanissue, trust, party)
+
+#regression model of triple interaction for women republicans with my deduced
+#gender variable
+model_5_ex_r <- lm(trust ~ candidate_gender*groupnum*womanissue, 
+                   data=df_5_ex_r)
+summary(model_5_ex_r)
+
+#_________________________________________________________________________
+#----sec 2: EXT PARTY - regression figure-----------------------------
+#_________________________________________________________________________
+#create dataframe with relevant variables to create interaction plot, using
+#section_interaction_figure function for democratc and republicans. I collect it
+#in one dataframe.
+df5_exd <- section_interaction_figure(model_5_ex_d)
+df5_exd$party <- c("Dem")
+
+df5_exr <- section_interaction_figure(model_5_ex_r)
+df5_exr$party <- c("Rep")
+
+df5_ex <- full_join(df5_exd, df5_exr)
+rm(df5_exd, df5_exr) #remove dataframes I no longer need. 
+
+#create marginal effects plot separated on party identification
+# I create marginals effect plot that shows the treatment effect with my deduced
+# gender variable. the plot show the marginal effect of the treatment on trust,
+# with a a treatment of an inparty male that supports a non-gender salient issue
+# as the reference category. Effect are show for two group, women that identify
+# as democrat or as republicans. I plot the estimated effect on the x-axis and
+# the treatment variables on the y-axis. I add a vertical line that shows the
+# when the marginal effect is zero compared the the reference category. I add
+# point labels that shows the estimated effects value depending on respondents
+# party, treatments vignette party and gender. I add limits and labels to the x
+# and y-axis. i also remove the axis title and axis grid. I add error bars that
+# show the 95% confidence interval
+pd <- position_dodge(0.55)
+pdf("extension_p.pdf", width = 9, height = 6)
+ggplot(df5_ex, aes(x=x_axis_value1, y=Estimate, color = party))+
+  geom_point(position = pd)+
+  geom_hline(yintercept = 0)+
+  scale_y_discrete(limits =c(-3:2), 
+                   breaks = c(-3, -2.5, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2))+
+  geom_errorbar(aes(ymin = minerror, 
+                    ymax = maxerror, width = 0.4), position = pd)+
+  labs(x = "", y = "Baseline effect")+
+  theme(panel.grid.minor.y=element_blank(),
+        panel.grid.major.y=element_blank())+
+  geom_text(aes(label = Estimate_label), hjust=0.5, vjust=-0.5, size=3.5, position = pd)+
+  scale_x_discrete(limits = c(7:1),
+                   labels = c("Woman", "Out-party","Gender-salient issue", 
+                              "Woman x out-party", "Woman \nx gender-salient issue", 
+                              "Out-party \nx gender-salient issue", 
+                              "Woman x out-party \nx gender-salient issue"))+
+  scale_color_manual(labels = c("Democratic \nwomen", 
+                                "Republican \nwomen"),
+                     values=c("blue","red"))+
+  coord_flip()
+dev.off()
+
+#clean global enviroment. 
+rm(list = apropos("df5_ex"))
+#______________________________________________________________________________
+#----sec 2: EXT GENDER- split for gender of respondents regression model----
+#______________________________________________________________________________
+# in the party of the extension i examine whether the treatments effects differs
+# on male and female observations. To do this, I create two datframe, on with
+# only female observation, and one with only male observation. I only run the
+# models with my deduced gender variable.
+#women respondents
+df_5_ex_w <- df_2_5 %>%
+  filter(gender == 2)%>% #select female respondents 
+  rename(candidate_gender = con_gen_code)%>% #my deduced gender variable
+  select(diffparty, candidate_gender, group, groupnum, 
+         womanissue, trust, party)
+
+#regression model for women respondents with my deduced gender variable
+model_5_ex_w<- lm(trust ~ candidate_gender*groupnum*womanissue,
+                  data = df_5_ex_w)
+summary(model_5_ex_w)
+
+
+#male respondents
+df_5_ex_m <- df_2_5 %>%
+  filter(gender == 1)%>% #select female respondents 
+  rename(candidate_gender = con_gen_code)%>% #my deduced gender variable
+  select(diffparty, candidate_gender, group, groupnum, 
+         womanissue, trust, party)
+
+#regression model for male respondents with my deduced gender variable
+model_5_ex_m<- lm(trust ~ candidate_gender*groupnum*womanissue,
+                  data = df_5_ex_m)
+summary(model_5_ex_m)
+
+#______________________________________________________________________________
+#----sec 2: EXT GENDER - interaction figure and code------------------------
+#______________________________________________________________________________
+#create dataframe with relevant variables to create interaction plot, using
+#section_interaction_figure function for female and male respondents.
+df_5_ex_w_1 <- section_interaction_figure(model_5_ex_w)
+df_5_ex_w_1$gender<- "Female"
+
+df_5_ex_m_1 <- section_interaction_figure(model_5_ex_m)
+df_5_ex_m_1$gender<- "Male"
+
+df_5_ex <- bind_rows(df_5_ex_w_1, df_5_ex_m_1)
+rm(df_5_ex_w_1, df_5_ex_m_1)
+
+
+#scatter variables
+pd <- position_dodge(0.55)
+
+#create interaction marginals effects plot for male and female respondents.
+# save it as a pdf with set height and width
+# add labels to describe the marginals effect
+  # I create marginals effect plot that shows the treatment effect with my
+  # deduced gender variable. the plot show the marginal effect of the treatment
+  # on trust, with a a treatment of an inparty male that supports a non-gender
+  # salient issue as the reference category. Effect are show for two group,
+  # women or men. I plot the estimated effect on the x-axis and the treatment
+  # variables on the y-axis. I add a vertical line that shows the when the
+  # marginal effect is zero compared the the reference category. I add point
+  # labels that shows the estimated effects value depending on respondents
+  # party, treatments vignette party and gender. I add limits and labels to the
+  # x and y-axis. i also remove the axis title and axis grid. I add error bars
+  # that show the 95% confidence interval
+pdf("extension_g.pdf", width = 9, height = 6)
+df_5_ex%>%
+  ggplot(aes(x=x_axis_value1, y=Estimate, color = gender))+
+  geom_point(position=pd, size = 2)+
+  geom_hline(yintercept = 0)+
+  geom_errorbar(aes(ymin = minerror, 
+                    ymax = maxerror), width = 0.4, position = pd)+
+  scale_x_discrete(limits = c(7:1),
+                   labels = c("Woman", "Out-party","Gender-salient issue", 
+                              "Woman x out-party", "Woman \nx gender-salient issue", 
+                              "Out-party \nx gender-salient issue", 
+                              "Woman x out-party \nx gender-salient issue"))+
+  labs(x = "", y = "Baseline effect")+
+  scale_y_continuous(limits = c(-2.5, 2.5))+
+  geom_text(aes(label = Estimate_label), hjust=0.5, vjust=-0.5, size=3.5, position = pd)+
+  scale_color_manual(values=c("red", "blue"))+
+  theme(panel.grid.minor.y = element_blank())+
+  theme(panel.grid.major.y = element_blank())+
+  coord_flip()
+dev.off()
+
+#clean global enviroment.
+rm(df_5_ex)
+
+#_______________________________________________________________________________
+#----sec 2: EXT GENDER AND PARTY - Regression table----
+#_______________________________________________________________________________
+# regression table with female, female dem, female rep and men.
+# create table with 4 model
+  # 1. model from Klars own paper, only women respondents
+  # 2. subgroup model with democratic women
+  # 3. subgroup model with republican women
+  # 4. model with men
+# adds models title, and rename variables so the make sense. 
+
+stargazer(model_5_ex_w, model_5_ex_d, model_5_ex_r, model_5_ex_m,
+          title = "Regression table of figure 5 - Gender of US Partisan", 
+          column.labels = c("Partisan", "Democrats", "Republican", "Partisan"),
+          covariate.labels = c("Woman", "Out-party", "Gender-salient issue", 
+                               "Woman X Out-party", "Woman X Gender-salient issue", 
+                               "Out-party X Gender-Salient issue", 
+                               "Woman X Out-party X Gender-salient issue"),
+          digits = 3, omit.stat=c("LL","ser","f"),
+          dep.var.labels=c("Women:","Men:"),
+          column.sep.width = "1",
+          dep.var.caption  = "Trust")
+
+#_______________________________________________________________________________
+#----sec 2: CATE simple contrast----
+#_______________________________________________________________________________
+#shown in appendix. shows estimated marginal means with a bonferroni interval
+trust.w <- emmeans(model_5_ex_w, ~ candidate_gender*groupnum*womanissue)
+contrast(trust.w, "consec", simple = "each", combine = TRUE, adjust = "bonf")
+
+trust.m <- emmeans(model_5_ex_m1, ~ candidate_gender*groupnum*womanissue)
+contrast(trust.m, "consec", simple = "each", combine = TRUE, adjust = "bonf")
+
+trust.d <- emmeans(model_5_ex_d, ~ candidate_gender*groupnum*womanissue)
+contrast(trust.d, "consec", simple = "each", combine = TRUE, adjust = "bonf")
+
+trust.r <- emmeans(model_5_ex_r, ~ candidate_gender*groupnum*womanissue)
+contrast(trust.r, "consec", simple = "each", combine = TRUE, adjust = "bonf")
+
+
+#______________________________________________________________________________
+#------------------------End of Section two--------------------------------------
+#______________________________________________________________________________
+rm(list=setdiff(ls(), c("section_interaction_figure", "df5con")))
+#clear global enviroment, but get function 
+
+#______________________________________________________________________________
+#----SECTION 3: open data----
+#______________________________________________________________________________
+df_6 <- read_dta("Dataset for Figure 6.dta")
+
+#______________________________________________________________________________
+#------------------------------sec 3: cleaing data------------------------------
+#______________________________________________________________________________
+str(df_6)
+#Klar does not include men, people under 18, independent, so these observation
+#is filter away.I also check if the gender coding is consistence or there is the
+#same problem as with there where with gender variable in section 2s dataset.
+
+#inspect party var - remove NA and 4 (independent)
+unique(df_6$pid)
+
+#inspect age var, remove under 18(5 and 7) and NA 
+unique(df_6$age)
+
+#inspect respons gender, and remove male and other observations
+unique(df_6$gender)
+#2 is female, which i keep
+
+#recode gender variable 
+unique(df_6$womancand)
+df_6$cand_gender[df_6$womancand == 0] <- "male"
+df_6$cand_gender[df_6$womancand == 1] <- "female"
+df_6$cand_gender <- as.factor(df_6$cand_gender)
+unique(df_6$cand_gender)
+#check what ref category is
+contrasts(df_6$cand_gender) 
+# change ref category to male
+df_6$cand_gender <- fct_relevel(df_6$cand_gender, c("male", "female")) 
+df_6$womanissue <- as.factor(df_6$womanissue)
+
+#create group treatment variable 
+attach(df_6)
+df_6$group[rdem == 1 & demcand == 1] <- "Ingroup (dem)" #dem
+df_6$group[rdem == 1 & demcand == 0] <- "Outgroup (dem)" #dem
+df_6$group[rdem == 0 & demcand == 0] <- "Ingroup (rep)" #rep
+df_6$group[rdem == 0 & demcand == 1] <- "Outgroup (rep)" #rep
+detach(df_6)
+
+attach(df_6)
+df_6$groupnum[group == "Ingroup (dem)" | group == "Ingroup (rep)"] <- 0
+df_6$groupnum[group == "Outgroup (dem)" | group == "Outgroup (rep)"] <- 1
+detach(df_6)
+
+attach(df_6)
+df_6$party[rdem == 0] <- "Rep"
+df_6$party[rdem == 1] <- "Dem"
+detach(df_6)
+
+#filtering, remove independents, under 18 and only keep women respondents.
+df_6 <- df_6 %>%
+  filter(pid != 4, !is.na(pid), 
+         age >= 18, !is.na(age),
+         gender == 2)
+
+#______________________________________________________________________________
+#----sec 3: interaction regression----
+#______________________________________________________________________________
+#triple interaction
+  # dependent variable is trust to fictive character
+  # interaction between elements in treatment vignette, in vs outparty, 
+  # whether the issue is gender salient and the characters gender
+model_6 <- lm(trust1 ~ cand_gender*diffparty*womanissue, data= df_6)
+summary(model_6)
+
+#______________________________________________________________________________
+#---- sec 3: interaction figure and code------------------------------------
+#______________________________________________________________________________
+#create dataframe with marginal interaction effect for figure. 
+df6 <- section_interaction_figure(model_6)
+
+#marginal interaction figure. 
+  # I create marginals effect plot that shows the treatment effect. the plot
+  # show the marginal effect of the treatment on trust, with a a treatment of an
+  # inparty male that supports a non-gender salient issue as the reference
+  # category. I plot the estimated effect on the x-axis and the treatment
+  # variables on the y-axis. I add a vertical line that shows the when the
+  # marginal effect is zero compared the the reference category. I add point
+  # labels that shows the estimated effects value depending on respondents
+  # party, treatments vignette party and gender. I add limits and labels to the
+  # x and y-axis. i also remove the axis title and axis grid. I add error bars
+  # that show the 95% confidence interval
+pdf("figure 6.pdf", width = 9, height = 6)
+ggplot(df6, aes(x=x_axis_value1, y=Estimate))+
+  geom_point()+
+  geom_hline(yintercept = 0)+
+  scale_y_discrete(limits =c(-2:2), 
+                   breaks = c(-1.5, -1, -0.5, 0, 0.5, 1, 1.5))+
+  geom_errorbar(aes(ymin = minerror, 
+                    ymax = maxerror, width = 0.4))+
+  labs(x = "", y = "Baseline effect")+
+  theme(panel.grid.minor.y=element_blank(),
+        panel.grid.major.y=element_blank())+
+  geom_text(aes(label = Estimate_label), hjust=0.5, vjust=-0.5, size=3.5)+
+  scale_x_discrete(limits = c(7:1),
+                   labels = c("Woman", "Out-party","Gender-salient issue", 
+                              "Woman x out-party", "Woman \nx gender-salient issue", 
+                              "Out-party \nx gender-salient issue", 
+                              "Woman x out-party \nx gender-salient issue"))+
+  coord_flip()
+dev.off()
+
+# I create a OLS triple regression table, that has the same information as the
+# plot above
+stargazer(model_6, 
+          title = "Regression table of figure 6",
+          covariate.labels = c("Woman", "Out-party", "Gender-salient issue", 
+                               "Woman X Out-party", "Woman X Gender-salient issue", 
+                               "Out-party X Gender-Salient issue", 
+                               "Woman X Out-party X Gender-salient issue"),
+          digits = 3, omit.stat=c("LL","ser","f"))
+# I clean the global enviroment
+rm(df6, df6_1)
+
+#_______________________________________________________________________________
+#---- sec 3: EXT PARTY: recode------------------------------------
+#_______________________________________________________________________________
+# I extent my analysis with a subgroup analysis of the treatment effect, given
+# the observations party identification. To do this, I create two dataframes,
+# one with democratic womne, and one with republican women. afterwards i run a
+# triple regression with the two new datasets.
+
+#democratics respondents
+df_6_ex_d <- df_6 %>%
+  filter(gender == 2,
+         party == "Dem")%>% #only select female respondens
+  select(diffparty, cand_gender, group, groupnum, 
+         womanissue, trust1, party)
+model_6_ex_d <- lm(trust1 ~ cand_gender*diffparty*womanissue, 
+                   data=df_6_ex_d)
+summary(model_6_ex_d)
+
+
+#Republican respondents
+df_6_ex_r <- df_6 %>%
+  filter(gender == 2,
+         party == "Rep")%>% #only select female respondens
+  select(diffparty, cand_gender, group, groupnum, 
+         womanissue, trust1, party)
+model_6_ex_r <- lm(trust1 ~ cand_gender*diffparty*womanissue, 
+                   data=df_6_ex_r)
+summary(model_6_ex_r)
+
+# I collect three regression model in a regression table. 
+# model 1: all women repondents
+# model 2: democratic women reppndents
+# model 3: Reoublican women reppndents
+stargazer(model_6, model_6_ex_d, model_6_ex_r,
+          title = "Regression table of figure 6 - spilt parties", 
+          column.labels = c("Partisans","Democrats", "Republican"),
+          covariate.labels = c("Woman", "Out-party", "Gender-salient issue", 
+                               "Woman X Out-party", "Woman X Gender-salient issue", 
+                               "Out-party X Gender-Salient issue", 
+                               "Woman X Out-party X Gender-salient issue"),
+          digits = 3, omit.stat=c("LL","ser","f"),
+          ci=TRUE, ci.level=0.95)
+#_________________________________________________________________________
+#----sec 3: EXT PARTY regression plot----
+#_________________________________________________________________________
+# I create a marginal effect interaction plot with dem and rep women, add obtain
+# relevant information to do this, use my function section_interaction_figure
+df6_exd <- section_interaction_figure(model_6_ex_d)
+df6_exd$party <- c("Dem")
+
+df6_exr <- section_interaction_figure(model_6_ex_r)
+df6_exr$party <- c("Rep")
+
+df6_ex <- full_join(df6_exd, df6_exr)
+rm(df6_exd, df6_exr)
+
+#marginal interaction figure. 
+# I create marginals effect plot that shows the treatment effect. the plot show
+# the marginal effect of the treatment on trust, with a a treatment of an
+# inparty male that supports a non-gender salient issue as the reference
+# category. I plot the estimated effect on the x-axis and the treatment
+# variables on the y-axis. I add a vertical line that shows the when the
+# marginal effect is zero compared the the reference category. I add point
+# labels that shows the estimated effects value depending on respondents party,
+# treatments vignette party and gender. I add limits and labels to the x and
+# y-axis. i also remove the axis title and axis grid. I add error bars that show
+# the 95% confidence interval. the plot shows the effect for rep and dem women
+pd <- position_dodge(0.6)
+pdf("6extension_p.pdf", width = 9, height = 6)
+ggplot(df6_ex, aes(x=x_axis_value1, y=Estimate, color = party))+
+  geom_point(position = pd)+
+  geom_hline(yintercept = 0)+
+  scale_y_discrete(limits =c(-2:2), 
+                   breaks = c(-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2))+
+  geom_errorbar(aes(ymin = minerror, 
+                    ymax = maxerror, width = 0.4), position = pd)+
+  labs(x = "", y = "Baseline effect")+
+  theme(panel.grid.minor.y=element_blank(),
+        panel.grid.major.y=element_blank())+
+  geom_text(aes(label = Estimate_label), hjust=0.5, vjust=-0.5, size=3.5, position = pd)+
+  scale_x_discrete(limits = c(7:1),
+                   labels = c("Woman", "Out-party","Gender-salient issue", 
+                              "Woman x out-party", "Woman \nx gender-salient issue", 
+                              "Out-party \nx gender-salient issue", 
+                              "Woman x out-party \nx gender-salient issue"))+
+  scale_color_manual(labels = c("Democratic \nwomen", 
+                                "Republican \nwomen"),
+                     values=c("blue","red"))+
+  coord_flip()
+dev.off()
+
+rm(df6_ex, df6_exd, df6_exr, df6_exd_1, df6_exr_1)
+#_________________________________________________________________________
+##----sec 3: EXT simple contrast----------------------------
+#_________________________________________________________________________
+#shown in appendix. shows estimated marginal means with a bonferroni interval
+library(emmeans)
+trust.w <- emmeans(model_6, ~ cand_gender*diffparty*womanissue)
+contrast(trust.w, "consec", simple = "each", combine = TRUE, adjust = "bonf")
+
+trust.d <- emmeans(model_6_ex_d, ~ cand_gender*diffparty*womanissue)
+contrast(trust.d, "consec", simple = "each", combine = TRUE, adjust = "bonf")
+
+trust.r <- emmeans(model_6_ex_r, ~ cand_gender*diffparty*womanissue)
+contrast(trust.r, "consec", simple = "each", combine = TRUE, adjust = "bonf")
+
+rm(model_6_ex_d, model_6_ex_r, trust.w, trust.d, trust.r, df_6_ex_d, df_6_ex_r)
+
+
+
+#_________________________________________________________________________
+#----sec 3: EXT subgroup ggplots --------------------------
+#_________________________________________________________________________
+df_6g <- df_6 %>%
+  filter(womanissue == 1)%>% #gender-salient issues
+  select(diffparty, cand_gender, group, groupnum, 
+         womanissue, trust1, party, cond)
+
+df_6ng <- df_6 %>%
+  filter(womanissue == 0)%>% #non-gender-salient issues
+  select(diffparty, cand_gender, group, groupnum, 
+         womanissue, trust1, party, cond)
+
+#create labels for parties in figure 
+party_names <- list("Dem" = "Democrats", "Rep" = "Republicans")
+party_labeller <- function(variable,value){
+  return(party_names[value])
+}
+
+#gender-salient issues
+pd <- position_dodge(0.2)
+pdf("6_subgroup_g.pdf", width = 8, height = 5)
+df_6g %>%
+  ggplot(aes(x=group, y = trust1, color = cand_gender, group = cand_gender))+
+  facet_grid(col = vars(party), scales = "free_x", labeller = party_labeller)+
+  stat_summary(fun = mean, geom = "point", position = pd) +
+  stat_summary(fun = mean, geom = "line", linetype = "dashed")+
+  stat_summary(geom = "errorbar",  width = 0.1, position = pd)+
+  scale_y_continuous(limits = c(1,7), breaks = c(1, 2, 3, 4, 5, 6, 7), labels = 
+                       c("1: Do not trust at all", "2", "3", "4: Moderaly trust", "5", "6", 
+                         "7: High degreee \nof trust"))+
+  scale_color_manual(labels = c("Male \ncharacter", "Female \ncharacter"), 
+                     values = c("blue", "red"))+
+  labs(x = "", y = "", color = "Gender")+
+  theme(panel.grid.major.x = element_blank())
+dev.off()
+
+
+
+pd <- position_dodge(0.2)
+pdf("6_subgroup_ng.pdf", width = 8, height = 5)
+df_6ng %>%
+  ggplot(aes(x=group, y = trust1, color = cand_gender, group = cand_gender))+
+  facet_grid(col = vars(party), scales = "free_x", labeller = party_labeller)+
+  stat_summary(fun = mean, geom = "point", position = pd) +
+  stat_summary(fun = mean, geom = "line", linetype = "dashed")+
+  stat_summary(geom = "errorbar",  width = 0.1, position = pd)+
+  scale_y_continuous(limits = c(1,7), breaks = c(1, 2, 3, 4, 5, 6, 7), labels = 
+                       c("1: Do not trust at all", "2", "3", "4: Moderaly trust", "5", "6", 
+                         "7: High degreee \nof trust"))+
+  scale_color_manual(labels = c("Male \ncharacter", "Female \ncharacter"), 
+                     values = c("blue", "red"))+
+  labs(x = "", y = "", color = "Gender")+
+  theme(panel.grid.major.x = element_blank())
+dev.off()
+rm(party_names, party_labeller)
+#_________________________________________________________________________
+#----sec 3: EXT gender-salient subgroup ggplot -------------
+#_________________________________________________________________________
+
+attach(df_6)
+df_6$treatment[cond %in% c(1, 2, 3, 4)] <- "LLA"
+df_6$treatment[cond %in% c(5, 6, 7, 8)] <- "STEM"
+df_6$treatment[cond %in% c(9, 10, 11, 12)] <- "Iran"
+df_6$treatment[cond %in% c(13, 14, 15, 16)] <- "Travel ban"
+detach(df_6)
+
+df_6$treatment <- as.factor(df_6$treatment)
+df_6$treatment <- fct_relevel(df_6$treatment, c("LLA", "STEM", "Iran", "Travel ban")) 
+
+
+df_6gcom <- df_6 %>%
+  filter(womanissue == 1) %>%
+  select(diffparty, cand_gender, group, groupnum, 
+         womanissue, trust1, party, treatment)
+
+attach(df_6g)
+df_6g$treatment[cond %in% c(1, 2, 3, 4, 5, 6, 7, 8)] <- "All gender-salient issues"
+detach(df_6g)
+df_6gcol <- bind_rows(df_6g, df_6gcom)
+
+pdf("df_6gcol.pdf", width = 8, height = 10)
+df_6gcol %>%
+  ggplot(aes(x=group, y = trust1, color = cand_gender, group = cand_gender))+
+  stat_summary(fun = mean, geom = "point", position = pd) +
+  stat_summary(fun = mean, geom = "line", linetype = "dashed")+
+  stat_summary(geom = "errorbar",  width = 0.1, position = pd)+
+  scale_y_continuous(limits = c(1,7), breaks = c(1, 2, 3, 4, 5, 6, 7), labels = 
+                       c("1: Do not trust at all", "2", "3", "4: Moderaly trust", "5", "6", 
+                         "7: High degreee \nof trust"))+
+  facet_grid(treatment ~ party, scales = "free_x")+
+  scale_color_manual(labels = c("Male \ncharacter", "Female \ncharacter"), 
+                     values = c("blue", "red"))+
+  
+  labs(x = "", y = "", color = "Gender")+
+  theme(panel.grid.major.x = element_blank())
+dev.off()
+rm(df_6gcom, df_6g)
+#_________________________________________________________________________
+#----sec 3: EXT non-gender-salient subgroup ggplot -------------
+#_________________________________________________________________________
+
+df_6ngcom <- df_6 %>%
+  filter(womanissue == 0) %>%
+  select(diffparty, cand_gender, group, groupnum, 
+         womanissue, trust1, party, treatment)
+
+attach(df_6ng)
+df_6ng$treatment[cond %in% c(9, 10, 11, 12, 13, 14, 15, 16)] <- 
+  "All non-gender-salient issues"
+detach(df_6ng)
+df_6ngcol <- bind_rows(df_6ng, df_6ngcom)
+
+pdf("df_6ngcol.pdf", width = 8, height = 10)
+df_6ngcol %>%
+  ggplot(aes(x=group, y = trust1, color = cand_gender, group = cand_gender))+
+  stat_summary(fun = mean, geom = "point", position = pd) +
+  stat_summary(fun = mean, geom = "line", linetype = "dashed")+
+  stat_summary(geom = "errorbar",  width = 0.1, position = pd)+
+  scale_y_continuous(limits = c(1,7), breaks = c(1, 2, 3, 4, 5, 6, 7), labels = 
+                       c("1: Do not trust at all", "2", "3", "4: Moderaly trust", "5", "6", 
+                         "7: High degreee \nof trust"))+
+  facet_grid(treatment ~ party, scales = "free_x")+
+  scale_color_manual(labels = c("Male \ncharacter", "Female \ncharacter"), 
+                     values = c("blue", "red"))+
+  
+  labs(x = "", y = "", color = "Gender")+
+  theme(panel.grid.major.x = element_blank())
+dev.off()
+rm(df_6ngcom, df_6ng)
+
+#_________________________________________________________________________
+#----sec 3: EXT treatments issues: regression model 
+#_________________________________________________________________________
+# in this section i check if the two different gender salient issues and the two
+# different non gender-salient issues effect the level of trust and if it
+# difference depending on party identification. Therefore, i create 12 different
+# OLS regression models, with either all or a specific gender and non-gender
+# salient issues for each party identification.
+
+
+# gender-salient issues 
+model_6g_all_dem <- lm(trust1 ~ diffparty*cand_gender, data=subset(df_6gcol,
+      treatment=="All gender-salient issues" & party =="Dem"))
+model_6g_all_rep <- lm(trust1 ~ diffparty*cand_gender, data=subset(df_6gcol, 
+      treatment=="All gender-salient issues" & party =="Rep"))
+model_6g_lla_dem <- lm(trust1 ~ diffparty*cand_gender, 
+      data=subset(df_6gcol, treatment=="LLA" & party =="Dem"))
+model_6g_lla_rep <- lm(trust1 ~ diffparty*cand_gender, data=subset(df_6gcol, 
+      treatment=="LLA" & party =="Rep"))
+model_6g_stem_dem <- lm(trust1 ~ diffparty*cand_gender, data=subset(df_6gcol, 
+      treatment=="STEM" & party =="Dem"))
+model_6g_stem_rep <- lm(trust1 ~ diffparty*cand_gender, data=subset(df_6gcol, 
+      treatment=="STEM" & party =="Rep"))
+
+#create regression table with gender salient issues, with 3 models:
+  # 1. all gender salients issues
+      #1.a democrats
+      #1.b republicans
+  # 2. with LLA treatment
+      #2.a democrats
+      #2.b republicans
+  # 3. with Women in stem treatment  
+      #3.a democrats
+      #3.b republicans
+model_6g_all <-stargazer(model_6g_all_dem, model_6g_all_rep, model_6g_lla_dem, 
+                         model_6g_lla_rep, model_6g_stem_dem, model_6g_stem_rep)
+
+# non-gender salient issues
+model_6ng_all_dem <- lm(trust1 ~ diffparty*cand_gender, data=subset(df_6ngcol, 
+      treatment=="All non-gender-salient issues" & party =="Dem"))
+model_6ng_all_rep <- lm(trust1 ~ diffparty*cand_gender, data=subset(df_6ngcol, 
+      treatment=="All non-gender-salient issues" & party =="Rep"))
+model_6ng_iran_dem <- lm(trust1 ~ diffparty*cand_gender, data=subset(df_6ngcol, 
+      treatment=="Iran" & party =="Dem"))
+model_6ng_iran_rep <- lm(trust1 ~ diffparty*cand_gender, data=subset(df_6ngcol, 
+      treatment=="Iran" & party =="Rep"))
+model_6ng_travel_dem <- lm(trust1 ~ diffparty*cand_gender, data=subset(df_6ngcol, 
+      treatment=="Travel ban" & party =="Dem"))
+model_6ng_travel_rep <- lm(trust1 ~ diffparty*cand_gender, data=subset(df_6ngcol, 
+      treatment=="Travel ban" & party =="Rep"))
+
+#create regression table with non-gender salient issues, with 3 models:
+# 1. all non-gender salients issues
+    #1.a democrats
+    #1.b republicans
+# 2. with Iran deal treatment
+    #2.a democrats
+    #2.b republicans
+# 3. with travel ban treatment 
+    #3.a democrats
+    #3.b republicans
+model_6ng_all <- stargazer(model_6ng_all_dem, model_6ng_all_rep, model_6ng_iran_dem, 
+                           model_6ng_iran_rep, model_6ng_travel_dem, model_6ng_travel_rep)
+
+#remove the regression models that i don't need them any more. 
+rm(model_6g_all_dem, model_6g_all_rep, model_6g_lla_dem, model_6g_lla_rep, 
+   model_6g_stem_dem, model_6g_stem_rep, model_6ng_all_dem, model_6ng_all_rep, 
+   model_6ng_iran_dem, model_6ng_iran_rep, model_6ng_travel_dem, model_6ng_travel_rep)
+
+#_________________________________________________________________________
+#---- sec 3: EXT interaction figure with just section 2 treatments----
+#_________________________________________________________________________
+# create dataframe with just the treatments from section 2, Iran deal
+# (df_6ngsim) and LLA (df_6gsim). I check want to check whether the triple OLS
+# regression from section 2 can be replicated if I just include the same
+# treatment as in section two. the two dataframes i collect in one
+# dataframe(df_6sim) and remove the dataframes I know longer need
+
+#gender-salient issues LLA
+df_6gsim <- df_6gcol %>%
+  filter(treatment=="LLA")
+
+#gender-salient issues Iran
+df_6ngsim <- df_6ngcol %>%
+  filter(treatment=="Iran")
+rm(df_6gcol, df_6ngcol)
+
+#combine in one dateframe
+df_6sim <- bind_rows(df_6gsim, df_6ngsim)
+#remove dateframe no longer needed.
+rm(df_6gsim, df_6ngsim)
+
+#create regression model with section 2 treatments. 
+model_df_6sim <- lm(trust1 ~ cand_gender*diffparty*womanissue, data=df_6sim)
+summary(model_df_6sim)
+
+# I use the function write further up in the code (section_interaction_figure)
+# to obtain the coefficients and confidence interval of the marginal treatment
+# effect when i just include the treatments used as well in section 2 and all
+# the treatment in section 3 so i create a marginal effect graph latter. I add a
+# variable (source) that shows the treatments in the interaction model. "df 6
+# part" means that just just the treatment from section 2 is included, while "df
+# 6 all" means that all the treatments in section 3 is included.
+df_6sim <- section_interaction_figure(model_df_6sim)
+df_6sim$source <- "df 6 part"
+df6 <- section_interaction_figure(model_6)
+df6$source <- "df 6 all"
+
+#create OLS regression table with section 2 treatments.
+stargazer(model_6_ex, model_df_6sim)
+
+#collect in one dataframe dftreat (dataframe on different treatment issues)
+dftreat <- full_join(df6, df_6sim)
+
+# I remove the objects i no longer need from the global enviroment
+rm(list = apropos("df6"))
+rm(list = apropos("df_6s"))
+rm(list = apropos("model"))
+
+# open data from section 2 to compare with the interaction model from section 3
+# both with part of the treatments and all of them
+df_5 <- df5con #open section 2 data
+rm(df5con)
+df_5$source <- "df 5" 
+df_5$Estimate_label <- as.character(round(df_5$Estimate, digits = 3))
+df_5$x_axis_value1 <- forcats::fct_rev(factor(df_5$x_axis_value)) 
+dftreat <- full_join(dftreat, df_5)
+dftreat$source <- as.factor(dftreat$source)
+dftreat$source <- fct_relevel(dftreat$source, c("df 5", "df 6 all", "df 6 part" )) 
+
+#rm(list=setdiff(ls(), c("dftreat")))
+
+pd <- position_dodge(-0.8)
+pdf("vignettes.pdf", width = 9, height = 7)
+ggplot(dftreat, aes(x=x_axis_value1, y=Estimate, color = source))+
+  geom_point(position = pd)+
+  geom_hline(yintercept = 0)+
+  scale_y_discrete(limits =c(-2.5, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2))+
+  geom_errorbar(aes(ymin = minerror, 
+                    ymax = maxerror, width = 0.4), position = pd)+
+  labs(x = "", y = "Baseline effect", color = "")+
+  theme(panel.grid.minor.y=element_blank(),
+        panel.grid.major.y=element_blank())+
+  geom_text(aes(label = Estimate_label), hjust=0.5, vjust=-0.5, size=3.5, position = pd)+
+  scale_x_discrete(limits = c(7:1),
+                   labels = c("Woman", "Out-party","Gender-salient issue", 
+                            "Woman x out-party", "Woman \nx gender-salient issue", 
+                             "Out-party \nx gender-salient issue", 
+                             "Woman x out-party \nx gender-salient issue"))+
+  scale_color_discrete(labels = c("Survey experiment in 2015", 
+   "Replication survey experiment in 2017 \nwith all treatment issues",
+   "Replication survey experiment in 2017\nwith only treatment issues 
+    \nfrom the 2015 survey experiment"))+
+  theme(legend.position = "bottom")+
+  coord_flip()
+dev.off()
+
+
+
