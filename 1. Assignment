@@ -1,0 +1,161 @@
+Sys.setenv("LANGUAGE"="EN")
+library(tidyverse)
+library(stargazer)
+setwd("C:/Users/Bruger/OneDrive - Københavns Universitet/Dokumenter/9. semester/methods/assignment 1/")
+load("CCES16_Common_OUTPUT_Feb2018_VV.RData")
+DF <- x
+rm(x)
+
+#----------------------------------------------------------------------------------------
+#4.1 Variable description.
+#hypotese: jo stærkere rep parti id, jo mere sandsynligt at man vil stemme på Trump
+
+DF4.1 <- DF %>%
+  select(pid7, inputstate, CC16_410a) %>%
+  rename(partyID = pid7, vote = CC16_410a, state = inputstate)%>%
+  mutate(partyID = fct_relevel(partyID, 
+                               c("Strong Democrat", "Not very strong Democrat", "Lean Democrat", "Independent", 
+                                 "Lean Republican", "Not very strong Republican", "Strong Republican")))%>%
+  filter(partyID %in% c("Strong Democrat", "Not very strong Democrat", "Lean Democrat", "Independent", 
+                        "Lean Republican", "Not very strong Republican", "Strong Republican"))
+
+levels(DF4.1$partyID) #dropper ubrugte levels 
+DF4.1 <- DF4.1 %>%
+  mutate(partyID2 = as.numeric(partyID) - 1) #enables me to get descriptive statistics for partyID
+
+
+##create summary tabel
+stargazer(DF4.1, type = "text", title="Descriptive statistics", digit = 2, style="apsr")
+
+##Use your best judgment to improve the graph by, for example, labeling the axes, changing the size, color, and 
+##fill of elements in the graph, etc.
+
+##graph of my choice
+#due to partyid is a ordered categorical(factor), it does not make sense to make a historgram of the distribution
+#instead I will plot partyID on a bar graph
+pdf("My_Graph_4.1.1.pdf",  width = 11, height = 6)
+ggplot(DF4.1, aes(partyID))+
+  geom_bar(width = 0.9)+
+  theme_minimal()+
+  labs(x = "Partisan Identification", y = "")
+dev.off()
+
+#--------------------------------------------------------------------------------------------------------------
+#4.2. Visualizing the variable of interest, aggregated across states
+
+DF4.2 <- DF4.1 %>%
+  group_by(state)%>%
+  mutate(partyID2 = mean(partyID2)) %>%
+  ungroup %>%
+  filter(state != c("District of Columbia")) %>%
+  mutate(state = fct_reorder(state, desc(partyID2)))
+
+pdf("My_Graph_4.2.1.pdf",  width = 6, height = 7)
+ggplot(DF4.2, aes(partyID2, state))+
+  geom_point()+
+  coord_cartesian(xlim = c(0, 6))+
+  scale_x_continuous(breaks = c(0, 1, 2, 3, 4, 5, 6), 
+                     labels = c("0\nStrong Democrat", "", "", "3\nIndenpendent", "", "", "6\nStrong Republican"))+
+  geom_vline(xintercept = 3, color = "grey20", size = 0.5, linetype = "dashed")+
+  theme(plot.margin = margin(0.5, 1, 0.5, 1, "cm"))+
+  labs(x = "Partisan Identification", y = "")
+dev.off()  
+
+#-------------------------------------------------------------------------------------------------------------------
+#4.3. Visualizing the relationship between the variable of interest and vote share for Trump
+
+DF4.3.1 <- DF4.2 %>% ##argumenter for hvorfor DC er droppet - meget få obs - meget clinton glad (10 procent trump)
+  filter(vote %in% c("Donald Trump (Republican)", "Hillary Clinton (Democrat)"))%>%
+  droplevels()%>%
+  add_count(state, name = "samplesize_state")
+
+DF4.3.2 <-DF4.3.1 %>%
+  group_by(state)%>%
+  summarize(state = unique(state), samplesize_state = unique(samplesize_state),
+            mean_partyID2 = mean(partyID2))
+
+DF4.3.7 <-DF4.3.1 %>%
+  filter(vote == c("Donald Trump (Republican)"))%>%
+  group_by(state)%>%
+  count(vote)%>%
+  summarize(state = unique(state), n = unique(n))%>%
+  rename(trump_vote = n)
+
+DF4.3 <- full_join(DF4.3.2, DF4.3.7)
+
+DF4.3 <- DF4.3 %>%
+  mutate(prop_trump = trump_vote/samplesize_state)
+
+ggplot(DF4.3, aes(mean_partyID2, prop_trump, size = samplesize_state))+
+  geom_point(alpha = 0.5,  stroke = 0.6)+
+  geom_smooth(method = "lm", fullrange = TRUE)+
+  scale_y_continuous(limits = c(0.3,0.7))+
+  scale_x_continuous(limits = c(2, 3.5))+
+  theme_minimal()
+##husk at argumenter for hvorfor det ikke giver mening at inkludere 0 - forsvært at aflæse de forskellige værdier
+
+#--------------------------------------------------------------------------
+#4.4. Regression
+DF4.4.1 <- DF %>%
+  select(pid7, CC16_410a) %>%
+  rename(partyID = pid7, vote = CC16_410a) %>%
+  mutate(partyID = fct_relevel(partyID, 
+                               c("Strong Democrat", "Not very strong Democrat", "Lean Democrat", "Independent", 
+                                 "Lean Republican", "Not very strong Republican", "Strong Republican")))%>%
+  filter(partyID %in% c("Strong Democrat", "Not very strong Democrat", "Lean Democrat", "Independent", 
+                        "Lean Republican", "Not very strong Republican", "Strong Republican"))%>%
+  mutate(partyID_2 = as.numeric(partyID) - 1)%>%
+  filter(vote %in% c("Donald Trump (Republican)", "Hillary Clinton (Democrat)"))%>%
+  mutate(vote = fct_relevel(vote, 
+                               c("Hillary Clinton (Democrat)", "Donald Trump (Republican)")))%>%
+  mutate(vote_b = as.numeric(vote) - 1)
+
+table(DF$educ)
+
+DF4.4.2 <- DF %>%
+  select(pid7, CC16_410a, pew_religimp, gender, educ) %>%
+  rename(partyID = pid7, vote = CC16_410a, rel = pew_religimp) %>%
+  ##recode of dependent, independent and interaction variable 
+  filter(rel %in% c("Not at all important", "Not too important", "Somewhat important", "Very important")) %>% ##drop NA values
+  mutate(partyID = fct_relevel(partyID, 
+                               c("Strong Democrat", "Not very strong Democrat", "Lean Democrat", "Independent", 
+                                 "Lean Republican", "Not very strong Republican", "Strong Republican")))%>%
+  filter(partyID %in% c("Strong Democrat", "Not very strong Democrat", "Lean Democrat", "Independent", 
+                        "Lean Republican", "Not very strong Republican", "Strong Republican"))%>% ##drop NA values
+  mutate(partyID_2 = as.numeric(partyID) - 1)%>%
+  filter(vote %in% c("Donald Trump (Republican)", "Hillary Clinton (Democrat)"))%>%
+  mutate(vote = fct_relevel(vote, 
+                            c("Hillary Clinton (Democrat)", "Donald Trump (Republican)")))%>%
+  mutate(vote_b = as.numeric(vote) - 1)%>%
+  mutate(rel = fct_relevel(rel, c("Not at all important", "Not too important", "Somewhat important", "Very important")))%>%
+  mutate(rel_2 = as.numeric(rel)) %>%
+  ## recode of gender, male as 0 and female as 1, dropping NA values. Gender is a control variable
+  filter(gender %in% c("Male", "Female"))%>%
+  mutate(gender_2 = as.numeric(gender) -1)%>%
+  ## recode of educ (education). Educ is a control variable. 
+  mutate(educ_2 = as.numeric(educ)-1)
+  
+unique(DF$CC16_403) ## kunne være sjovt at se hvordan folk har stemt. 
+
+#tabel 4.4 model 1 - only include vote choice and party ID
+table_4.4_m1 <- lm(vote_b ~ partyID_2, data = DF4.4.1)
+#table 4.4 model 2 - includes control variables
+table_4.4_m2 <- lm(vote_b ~ partyID_2 + rel_2 + gender_2 + educ_2, data = DF4.4.2)
+#table 4.4 model 3 - includes interactin between partyID and religion
+table_4.4_m3 <- lm(vote_b ~ partyID_2 * rel_2 + gender_2 + educ_2, data = DF4.4.2)
+
+stargazer(table_4.4_m1, table_4.4_m2, table_4.4_m3, digits = 3, 
+          dep.var.caption = "Vote for Trump", dep.var.labels = "Model:", 
+          column.labels = c("", "Inclusion of control variables", "Interaction"),
+          order = c(1, 5, 2, 3, 4),
+          covariate.labels = c("Party Identification", "Party Identification X Religion", "Religion", "Gender", "Education level"),
+          star.cutoffs = c(0.10, 0.05, 0.01),
+          out = "reg_results.txt", font.size = "small", column.sep.width = "1pt")
+          
+          notes = c("The response variable, Vote for Trump, is a binary variable, where 0: voted for Clinton and",
+                    "1: voted for Trump, in the 2016 presidential election",
+          "Party Identification goes from 0: Strong Democrat to 6: Strong Republican", 
+          "Religion measured on a four item scale, from 0-4, on how important religion is. 0: not at all important to 3: very important",
+          "Gender is a binary variable, where male is the referent group, and female is code as 1",
+          "Education level measures education level on an 6 item scale. 0: No highschool, 1: High school, 2: some college,", 
+          "3: 2-year college, 4: 4-year, 6: post graduate or higher education"), notes.append = TRUE)
